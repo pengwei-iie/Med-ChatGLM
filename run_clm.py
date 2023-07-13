@@ -62,17 +62,21 @@ from chat_dataset import chat_data_collator, Chat_Dataset
 
 # require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/language-modeling/requirements.txt")
 
+# 创建一个logger对象，用于记录日志信息。
 logger = logging.getLogger(__name__)
 
-
+# 获取所有可用的模型配置类。
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+# 定义一个继承自torch.nn.Sequential的类CastOutputToFloat，用于将输出转换为torch.float32类型。
 class CastOutputToFloat(torch.nn.Sequential):
     def forward(self, x):
         return super().forward(x).to(torch.float32)
 
+# 定义一个继承自TrainerCallback的类LoggingLossCallback，用于在训练过程中记录损失值的回调函数。
 class LoggingLossCallback(TrainerCallback):
+    # log_interval表示记录日志的间隔步数，log_file表示日志文件的路径。
     def __init__(self, log_interval: int, log_file: str):
         super().__init__()
         self.log_interval = log_interval
@@ -80,12 +84,14 @@ class LoggingLossCallback(TrainerCallback):
 
     def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, logs: Dict[str, float], **kwargs):
         if state.global_step % self.log_interval == 0:
+            # 从日志中获取损失值
             loss = logs.get("loss", None)
             if loss is not None:
                 with open(self.log_file, "a") as f:
                     f.write(f"Step: {state.global_step}, Loss: {loss}\n")
         return control
 
+# 定义一个数据类ModelArguments，用于存储模型相关的参数。
 @dataclass
 class ModelArguments:
     """
@@ -254,6 +260,7 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
+    # 解析命令行参数，包括模型参数、数据参数和训练参数。
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
@@ -266,7 +273,7 @@ def main():
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
     send_example_telemetry("run_clm", model_args, data_args)
 
-    # Setup logging
+    # Setup logging 设置日志记录，包括日志格式、日志级别等。
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -290,7 +297,7 @@ def main():
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
-    # Detecting last checkpoint.
+    # Detecting last checkpoint.检测最后一个检查点，如果存在，则从该点恢复训练；否则，从头开始训练。
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -317,6 +324,7 @@ def main():
     #
     # In distributed training, the load_dataset function guarantee that only one local process can concurrently
     # download the dataset.
+    # 加载数据集，可以是公共数据集或自定义数据集。对于公共数据集，可以从Hugging Face Hub下载并自动处理分片。这里是非
     if data_args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
         raw_datasets = load_dataset(
@@ -344,6 +352,7 @@ def main():
                 streaming=data_args.streaming,
             )
         lm_datasets = raw_datasets
+    # 加载自己的数据集
     else:
         data_files = {}
         dataset_args = {}
@@ -366,6 +375,7 @@ def main():
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
 
+    # 加载配置文件、预训练模型和分词器。根据提供的配置名称或路径加载预训练模型，并使用相应的分词器对文本进行编码。
     config_kwargs = {
         "cache_dir": model_args.cache_dir,
         "revision": model_args.model_revision,
@@ -398,7 +408,7 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
-
+    # 从model_name_or_path加载模型
     if model_args.model_name_or_path:
         torch_dtype = (
             model_args.torch_dtype
@@ -423,18 +433,20 @@ def main():
         model = ChatGLMForConditionalGeneration.from_config(config)
         n_params = sum({p.data_ptr(): p.numel() for p in model.parameters()}.values())
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
-
+    # 启用梯度检查点功能,可以减少模型训练时的内存占用。
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
     model.is_parallelizable = False
     model.model_parallel = False
     # model.lm_head = CastOutputToFloat(model.lm_head)
+    # 禁用了模型的缓存功能，这可能会降低推理速度，但可以减少内存占用。
     model.config.use_cache = (
         False  # silence the warnings. Please re-enable for inference!
     )
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
+    # 如果输入数据中包含的词汇超过了嵌入层的大小，就需要调整嵌入层的大小，以便能够处理所有的词汇。
     embedding_size = model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
         model.resize_token_embeddings(len(tokenizer))
@@ -493,7 +505,7 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         tokenizer=tokenizer,
-        # Data collator will default to DataCollatorWithPadding, so we change it.
+        # Data collator will default to DataCollatorWithPadding, so we change it. 用于处理数据的数据收集器，默认为DataCollatorWithPadding，这里使用了自定义的chat_data_collator
         data_collator=chat_data_collator,
         compute_metrics=compute_metrics if training_args.do_eval and not is_torch_tpu_available() else None,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics
