@@ -54,6 +54,7 @@ def chat_data_collator(features: list) -> dict:
     attention_mask_list = []
     position_ids_list = []
     labels_list = []
+    # 将tokenizer.eos_token_id添加到ids列表的末尾，然后使用[-100] * (longest - ids_l - 1)将ids列表扩展到最大长度。这是为了确保输入的长度与最大长度一致。
     for ids_l, feature in sorted(zip(len_ids, features), key=lambda x: -x[0]):
         ids = feature["input_ids"]
         seq_len = feature["seq_len"]
@@ -63,6 +64,7 @@ def chat_data_collator(features: list) -> dict:
             + [tokenizer.eos_token_id]
             + [-100] * (longest - ids_l - 1)
         )
+        # 接下来，将[tokenizer.eos_token_id] * (longest - ids_l)添加到ids列表的末尾，以确保输入的长度与最大长度一致。
         ids = ids + [tokenizer.eos_token_id] * (longest - ids_l)
         _ids = torch.LongTensor(ids)
         attention_mask, position_ids = get_masks_and_position_ids(
